@@ -3,9 +3,11 @@ use std::{fmt, fs, net::SocketAddr, path, process::ExitCode, sync::Arc};
 use anyhow::Context;
 use axum::{async_trait, extract::DefaultBodyLimit, Router};
 use container_registry::{
-    auth::{self, AuthProvider},
+    auth::{self, AuthProvider, Permissions, ValidCredentials, Unverified},
     hooks::RegistryHooks,
     storage::ManifestReference,
+    storage::ImageLocation,
+    ImageDigest
 };
 use sec::Secret;
 use structopt::StructOpt;
@@ -35,6 +37,28 @@ impl RegistryHooks for LoggingHook {
         info!(%manifest_reference, "new manifest uploaded");
     }
 }
+
+struct NoAuth;
+
+#[async_trait]
+impl AuthProvider for NoAuth {
+    async fn check_credentials(&self, _unverified: &Unverified) -> Option<ValidCredentials> {
+        Some(ValidCredentials::new(NoAuth))
+    }
+
+    async fn image_permissions(
+        &self,
+        _creds: &ValidCredentials,
+        _image: &ImageLocation,
+    ) -> Permissions {
+        Permissions::ReadWrite
+    }
+
+    async fn blob_permissions(&self, _creds: &ValidCredentials, _blob: &ImageDigest) -> Permissions {
+        Permissions::ReadWrite
+    }
+}
+
 
 async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -67,7 +91,7 @@ async fn run() -> anyhow::Result<()> {
         Arc::new(password)
     } else {
         warn!("no password set, allowing access with any credential");
-        Arc::new(auth::Permissions::ReadWrite)
+        Arc::new(NoAuth)
     };
 
     let registry = container_registry::ContainerRegistry::builder()
